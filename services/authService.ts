@@ -13,24 +13,58 @@ export const authService = {
     if (authError) throw new Error(authError.message);
     if (!authData.user) throw new Error('No user data returned');
 
-    // 2. Fetch Profile & Tenant
-    const { data: profile, error: profileError } = await supabase
+    // 2. Fetch Profile
+    let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', authData.user.id)
       .single();
 
-    if (profileError) throw new Error('Profile not found. Please contact support.');
+    // --- RECOVERY BLOCK START ---
+    // If profile is missing but User exists (caused by previous errors), try to recover it using metadata
+    if (!profile) {
+       console.warn("Profile missing. Attempting recovery...");
+       const meta = authData.user.user_metadata;
+       
+       if (meta && meta.tenant_id) {
+           // Attempt to insert profile on the fly
+           const { data: newProfile, error: recoveryError } = await supabase
+            .from('profiles')
+            .insert({
+                id: authData.user.id,
+                tenant_id: meta.tenant_id,
+                name: meta.name || 'Recovered User',
+                email: authData.user.email,
+                role: meta.role || 'ADMIN',
+                permissions: ['VIEW_DASHBOARD', 'MANAGE_PRODUCTS', 'MANAGE_ORDERS', 'MANAGE_USERS', 'MANAGE_SETTINGS'],
+                avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(meta.name || 'User')}&background=random`
+            })
+            .select()
+            .single();
+            
+            if (!recoveryError && newProfile) {
+                profile = newProfile;
+            } else {
+                console.error("Recovery failed:", recoveryError);
+            }
+       }
+    }
+    // --- RECOVERY BLOCK END ---
 
+    if (!profile) {
+       throw new Error('Profile not found. If this persists, please sign up again with a different email.');
+    }
+
+    // 3. Fetch Tenant
     const { data: tenant, error: tenantError } = await supabase
       .from('tenants')
       .select('*')
       .eq('id', profile.tenant_id)
       .single();
 
-    if (tenantError) throw new Error('Tenant not found');
+    if (tenantError || !tenant) throw new Error('Company data not found.');
 
-    // 3. Map to App Types (Snake to Camel)
+    // 4. Map to App Types
     const mappedUser: User = {
         id: profile.id,
         name: profile.name,
@@ -62,68 +96,62 @@ export const authService = {
   },
 
   signup: async (name: string, email: string, password: string, companyName: string): Promise<{ user: User; tenant: Tenant }> => {
-    // 1. Generate Tenant ID Client-Side
-    // This avoids the need to .select() the tenant back, which fails RLS for anonymous users
+    // 1. Generate IDs Client-Side
     const tenantId = crypto.randomUUID();
-    const tenantSlug = companyName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
+    const slug = companyName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 10000);
 
-    // 2. Create Tenant (Without Select)
+    // 2. Insert Tenant (Publicly allowed via RLS)
     const { error: tenantError } = await supabase
         .from('tenants')
         .insert({
             id: tenantId,
             name: companyName,
-            slug: tenantSlug,
-            subscription_tier: 'FREE'
+            slug: slug,
+            subscription_tier: 'FREE',
+            status: 'ACTIVE'
         });
 
-    if (tenantError) throw new Error('Failed to create company record: ' + tenantError.message);
+    if (tenantError) {
+        console.error('Tenant Creation Failed:', tenantError);
+        throw new Error('Failed to create company. Please try again.');
+    }
 
     // 3. Create Auth User
+    // IMPORTANT: We pass tenant_id, role, and name in 'data'. 
+    // The SQL TRIGGER we created will use this to automatically create the Profile.
     const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-            data: { name } 
+            data: { 
+                name: name,
+                tenant_id: tenantId,
+                role: Role.ADMIN
+            }
         }
     });
 
     if (authError) throw new Error(authError.message);
-    if (!authData.user) throw new Error('Auth creation failed');
+    if (!authData.user) throw new Error('Account creation failed.');
 
-    // 4. Create Profile
-    const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-            id: authData.user.id,
-            tenant_id: tenantId,
-            name: name,
-            role: Role.ADMIN,
-            permissions: ['VIEW_DASHBOARD', 'MANAGE_PRODUCTS', 'MANAGE_ORDERS', 'MANAGE_USERS', 'MANAGE_SETTINGS'],
-            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
-        })
-        .select()
-        .single();
+    // 4. Insert Default Settings (Public RLS)
+    await supabase.from('settings').insert({
+        tenant_id: tenantId,
+        currency: 'PKR',
+        timezone: 'Asia/Karachi'
+    });
 
-    if (profileError) {
-        // Rollback attempt (optional, but good practice)
-        // await supabase.auth.signOut();
-        throw new Error('Failed to create user profile: ' + profileError.message);
-    }
-
-    // 5. Settings
-    await supabase.from('settings').insert({ tenant_id: tenantId });
-
-    // Map result
+    // 5. Construct Response
+    // Since the profile is created by the database trigger, we construct the object manually for immediate UI feedback
     return {
         user: {
-            id: profile.id,
-            name: profile.name,
+            id: authData.user.id,
+            name: name,
             email: email,
-            role: profile.role as any,
-            tenantId: profile.tenant_id,
-            permissions: profile.permissions,
-            createdAt: profile.created_at
+            role: Role.ADMIN,
+            tenantId: tenantId,
+            permissions: ['VIEW_DASHBOARD', 'MANAGE_PRODUCTS', 'MANAGE_ORDERS', 'MANAGE_USERS', 'MANAGE_SETTINGS'],
+            createdAt: new Date().toISOString()
         },
         tenant: {
             id: tenantId,
@@ -181,6 +209,7 @@ export const authService = {
             }
         };
     } catch (e) {
+        console.error("Session check failed", e);
         return null;
     }
   }

@@ -1,0 +1,7 @@
+{
+  "name": "Copy of ZaynahsPOS",
+  "description": "A high-fidelity SaaS Admin Dashboard simulation. Features multi-tenant management, product inventory, order tracking, and analytics visualization.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

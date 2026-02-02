@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZaynahsPOS</title>
+    <link rel="icon" type="image/svg+xml" href="https://res.cloudinary.com/dvwdpjf4k/image/upload/v1769353498/favicon_fuvfis.svg" />
+    <link rel="icon" type="image/png" sizes="96x96" href="https://res.cloudinary.com/dvwdpjf4k/image/upload/v1769353491/favicon-96x96_imyakk.png" />
+    <link rel="apple-touch-icon" href="https://res.cloudinary.com/dvwdpjf4k/image/upload/v1769353492/apple-touch-icon_q7clko.png" />
+    <link rel="shortcut icon" href="https://res.cloudinary.com/dvwdpjf4k/image/upload/v1769353491/favicon_wdjld1.ico" />
+    <link rel="manifest" href="/manifest.json" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Libre+Barcode+128&family=Libre+Barcode+39&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              'barcode-128': ['"Libre Barcode 128"', 'cursive'],
+              'barcode-39': ['"Libre Barcode 39"', 'cursive'],
+            },
+            colors: {
+              primary: '#059669', // Emerald 600
+              secondary: '#047857', // Emerald 700
+              dark: '#111827',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #f3f4f6;
+        transition: background-color 0.3s, color 0.3s;
+      }
+      
+      .dark body {
+        background-color: #0f172a;
+        color: #f1f5f9;
+      }
+
+      .dark {
+        color-scheme: dark;
+      }
+
+      /* STRICT THEME ENFORCEMENT FOR ALL INPUTS */
+      input, select, textarea {
+        background-color: #ffffff !important; 
+        color: #000000 !important; /* Pure black fonts on white */
+        border: 1px solid #cbd5e1 !important;
+      }
+      
+      .dark input, .dark select, .dark textarea {
+        background-color: #1e293b !important; /* Slate-800 depth */
+        color: #ffffff !important; /* Pure white fonts on dark */
+        border: 1px solid #334155 !important;
+      }
+
+      input::placeholder, textarea::placeholder {
+        color: #64748b !important;
+      }
+      .dark input::placeholder, .dark textarea::placeholder {
+        color: #94a3b8 !important;
+      }
+
+      .dark ::-webkit-calendar-picker-indicator {
+        filter: invert(1);
+      }
+
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1; 
+        border-radius: 4px;
+      }
+      .dark ::-webkit-scrollbar-thumb { background: #475569; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "zustand": "https://esm.sh/zustand@^5.0.11",
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "recharts": "https://esm.sh/recharts@^3.7.0",
+    "dexie": "https://esm.sh/dexie@^4.3.0",
+    "html5-qrcode": "https://esm.sh/html5-qrcode@^2.3.8",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "axios": "https://esm.sh/axios@^1.13.4",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "path": "https://esm.sh/path@^0.12.7",
+    "url": "https://esm.sh/url@^0.11.4",
+    "mongoose": "https://esm.sh/mongoose@^9.1.5",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.93.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('SW registered: ', registration);
+            })
+            .catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>

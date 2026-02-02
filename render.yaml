@@ -1,0 +1,60 @@
+services:
+  # ------------------------------------
+  # Backend Service (Node.js)
+  # ------------------------------------
+  - type: web
+    name: saas-nexus-backend
+    env: node
+    # CRITICAL: Tells Render the backend code is in the 'backend' folder
+    root: backend
+    # Commands run inside the 'backend' folder
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_URL
+        fromService:
+          type: static
+          name: saas-nexus-frontend
+      # You will need to manually add these in Render Dashboard
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: API_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+
+  # ------------------------------------
+  # Frontend Service (Static Site)
+  # ------------------------------------
+  - type: static
+    name: saas-nexus-frontend
+    env: static
+    # Frontend is in the root, so no 'root' property needed
+    buildCommand: npm install && npm run build
+    publishDir: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: saas-nexus-backend
+          property: url

@@ -1,24 +1,27 @@
+
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, ArrowRight, CheckCircle } from 'lucide-react';
-import { emailService } from '../services/emailService';
+import { Mail, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
+import { authService } from '../services/authService';
 import { APP_CONFIG } from '../config';
 
 export const ForgotPasswordPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError('');
     
-    // Simulate API call using our Email Service
     try {
-      await emailService.sendPasswordReset(email);
+      await authService.resetPassword(email);
       setIsSubmitted(true);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setError(e.message || "Failed to send reset link. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -44,6 +47,17 @@ export const ForgotPasswordPage: React.FC = () => {
         <div className="bg-white py-8 px-4 shadow-xl shadow-slate-200/50 sm:rounded-xl sm:px-10 border border-slate-100">
           {!isSubmitted ? (
             <form className="space-y-6" onSubmit={handleSubmit}>
+              {error && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-md">
+                  <div className="flex">
+                    <AlertCircle className="h-5 w-5 text-red-400" />
+                    <div className="ml-3">
+                      <p className="text-sm text-red-700">{error}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-slate-700">
                   Email address
@@ -60,7 +74,7 @@ export const ForgotPasswordPage: React.FC = () => {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="block w-full pl-10 sm:text-sm border-slate-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 p-2.5 border"
+                    className="block w-full pl-10 sm:text-sm border-slate-300 rounded-lg focus:ring-emerald-500 focus:border-emerald-500 p-2.5 border"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -70,7 +84,7 @@ export const ForgotPasswordPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
+                  className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
                 >
                    {isLoading ? (
                     <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></span>
@@ -93,7 +107,7 @@ export const ForgotPasswordPage: React.FC = () => {
               <div className="mt-6">
                 <Link
                   to="/login"
-                  className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+                  className="text-sm font-medium text-emerald-600 hover:text-emerald-500"
                 >
                   Back to sign in
                 </Link>
@@ -103,7 +117,7 @@ export const ForgotPasswordPage: React.FC = () => {
           
           {!isSubmitted && (
             <div className="mt-6 text-center">
-              <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-500 text-sm">
+              <Link to="/login" className="font-medium text-emerald-600 hover:text-emerald-500 text-sm">
                 Back to sign in
               </Link>
             </div>

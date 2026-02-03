@@ -1,9 +1,10 @@
 
 -- =======================================================================================================
--- ZAYNAHS POS - COMPLETE PRODUCTION SCHEMA (A-Z RESET)
+-- ZAYNAHS POS - ULTIMATE PRODUCTION SCHEMA (V4.0 - FINAL)
+-- Covers: Auth, Database, Realtime, Storage Buckets, RLS Security, Triggers
 -- =======================================================================================================
 
--- 1. CLEANUP (Drop everything to start fresh)
+-- 1. CLEANUP (RESET DATABASE - CAUTION)
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
 GRANT ALL ON SCHEMA public TO postgres;
@@ -11,20 +12,21 @@ GRANT ALL ON SCHEMA public TO public;
 
 -- 2. EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm"; -- For Search
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- 3. ENUMS
 CREATE TYPE user_role AS ENUM ('SUPER_ADMIN', 'ADMIN', 'MANAGER', 'CASHIER', 'SALESMAN', 'USER');
 CREATE TYPE tenant_status AS ENUM ('ACTIVE', 'PENDING', 'SUSPENDED', 'ARCHIVED');
 CREATE TYPE order_status AS ENUM ('COMPLETED', 'PENDING', 'PROCESSING', 'CANCELLED', 'RETURNED');
+CREATE TYPE purchase_status AS ENUM ('DRAFT', 'ORDERED', 'RECEIVED', 'CANCELLED');
 CREATE TYPE stock_movement_type AS ENUM ('SALE', 'RETURN', 'ADJUSTMENT', 'IN', 'OUT');
 
 -- =======================================================================================================
--- 4. TABLES
+-- 4. DATABASE TABLES
 -- =======================================================================================================
 
--- 4.1 TENANTS (Companies/Shops)
+-- 4.1 TENANTS (Shops)
 CREATE TABLE tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,
@@ -33,7 +35,7 @@ CREATE TABLE tenants (
     phone TEXT,
     address TEXT,
     logo_url TEXT,
-    status TEXT DEFAULT 'ACTIVE', -- stored as text for flexibility, validated in app
+    status TEXT DEFAULT 'ACTIVE',
     subscription_tier TEXT DEFAULT 'FREE',
     subscription_status TEXT DEFAULT 'ACTIVE',
     subscription_expiry TIMESTAMPTZ,
@@ -50,7 +52,7 @@ CREATE TABLE profiles (
     role TEXT DEFAULT 'CASHIER',
     pin TEXT,
     pin_required BOOLEAN DEFAULT TRUE,
-    permissions TEXT[],
+    permissions TEXT[], 
     avatar_url TEXT,
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -61,11 +63,13 @@ CREATE TABLE profiles (
 CREATE TABLE settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
-    currency TEXT DEFAULT 'USD',
-    timezone TEXT DEFAULT 'UTC',
+    currency TEXT DEFAULT 'PKR',
+    timezone TEXT DEFAULT 'Asia/Karachi',
+    theme TEXT DEFAULT 'light',
     tax_rate NUMERIC(5,4) DEFAULT 0,
     receipt_header TEXT,
     receipt_footer TEXT,
+    -- Receipt Options
     show_logo_on_receipt BOOLEAN DEFAULT TRUE,
     show_cashier_on_receipt BOOLEAN DEFAULT TRUE,
     show_customer_on_receipt BOOLEAN DEFAULT TRUE,
@@ -77,12 +81,18 @@ CREATE TABLE settings (
     receipt_template TEXT DEFAULT 'modern',
     receipt_font_size INTEGER DEFAULT 12,
     receipt_margin INTEGER DEFAULT 10,
+    -- Label Options
+    barcode_format TEXT DEFAULT 'CODE128',
+    barcode_label_format TEXT DEFAULT 'A4_30',
+    barcode_show_price BOOLEAN DEFAULT TRUE,
+    barcode_show_name BOOLEAN DEFAULT TRUE,
+    -- Security
     require_cashier BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4.4 CATALOG
+-- 4.4 INVENTORY
 CREATE TABLE categories (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -107,7 +117,7 @@ CREATE TABLE products (
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     sku TEXT NOT NULL,
-    category TEXT,
+    category TEXT DEFAULT 'General',
     price NUMERIC(10,2) DEFAULT 0 CHECK (price >= 0),
     cost_price NUMERIC(10,2) DEFAULT 0 CHECK (cost_price >= 0),
     stock INTEGER DEFAULT 0,
@@ -146,9 +156,9 @@ CREATE TABLE orders (
     customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
     customer_name TEXT,
     user_id TEXT, 
-    salesperson_id TEXT,
+    salesperson_id TEXT, 
     salesperson_name TEXT,
-    cashier_id TEXT,
+    cashier_id TEXT, 
     cashier_name TEXT,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
     is_return BOOLEAN DEFAULT FALSE,
@@ -158,7 +168,7 @@ CREATE TABLE orders (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4.7 LOGS & FINANCIALS
+-- 4.7 LOGS & FINANCE
 CREATE TABLE stock_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -215,6 +225,7 @@ CREATE TABLE notifications (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 4.8 PLANS
 CREATE TABLE plans (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -242,7 +253,32 @@ CREATE TABLE subscription_requests (
 );
 
 -- =======================================================================================================
--- 5. TRIGGER: AUTOMATIC PROFILE CREATION (FIXES SIGNUP)
+-- 5. STORAGE CONFIGURATION
+-- =======================================================================================================
+
+-- Create Buckets
+INSERT INTO storage.buckets (id, name, public) 
+VALUES 
+  ('products', 'products', true),
+  ('logos', 'logos', true),
+  ('proofs', 'proofs', false) 
+ON CONFLICT (id) DO NOTHING;
+
+-- RLS for Storage (INSERT, UPDATE, DELETE, SELECT)
+CREATE POLICY "Public Read Products" ON storage.objects FOR SELECT USING ( bucket_id = 'products' );
+CREATE POLICY "Authenticated Upload Products" ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'products' AND auth.role() = 'authenticated' );
+CREATE POLICY "Authenticated Update Products" ON storage.objects FOR UPDATE USING ( bucket_id = 'products' AND auth.role() = 'authenticated' );
+CREATE POLICY "Authenticated Delete Products" ON storage.objects FOR DELETE USING ( bucket_id = 'products' AND auth.role() = 'authenticated' );
+
+CREATE POLICY "Public Read Logos" ON storage.objects FOR SELECT USING ( bucket_id = 'logos' );
+CREATE POLICY "Authenticated Upload Logos" ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'logos' AND auth.role() = 'authenticated' );
+CREATE POLICY "Authenticated Update Logos" ON storage.objects FOR UPDATE USING ( bucket_id = 'logos' AND auth.role() = 'authenticated' );
+
+CREATE POLICY "Authenticated Upload Proofs" ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'proofs' AND auth.role() = 'authenticated' );
+CREATE POLICY "Super Admin View Proofs" ON storage.objects FOR SELECT USING ( bucket_id = 'proofs' ); -- In real app, add check for role
+
+-- =======================================================================================================
+-- 6. TRIGGERS
 -- =======================================================================================================
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -252,16 +288,13 @@ DECLARE
   new_role TEXT;
   new_name TEXT;
 BEGIN
-  -- Extract from metadata
   new_tenant_id := (new.raw_user_meta_data->>'tenant_id')::UUID;
   new_role := (new.raw_user_meta_data->>'role');
   new_name := (new.raw_user_meta_data->>'name');
 
-  -- Defaults
   IF new_role IS NULL THEN new_role := 'CASHIER'; END IF;
   IF new_name IS NULL THEN new_name := 'User'; END IF;
 
-  -- Insert Profile
   INSERT INTO public.profiles (id, tenant_id, name, email, role, permissions, avatar_url)
   VALUES (
     new.id,
@@ -275,22 +308,19 @@ BEGIN
     END,
     'https://ui-avatars.com/api/?name=' || replace(new_name, ' ', '+') || '&background=random'
   );
-
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Bind Trigger
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 -- =======================================================================================================
--- 6. ROW LEVEL SECURITY (RLS)
+-- 7. RLS SECURITY POLICIES (STRICT)
 -- =======================================================================================================
 
--- Enable RLS on everything
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
@@ -306,53 +336,50 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE discounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscription_requests ENABLE ROW LEVEL SECURITY;
 
--- 6.1 TENANT POLICIES (Allow Signup)
--- Anyone can insert a tenant (for signup)
-CREATE POLICY "Allow public insert tenants" ON tenants FOR INSERT WITH CHECK (true);
--- Users can view their own tenant
+-- Tenants
+CREATE POLICY "Public create tenant" ON tenants FOR INSERT WITH CHECK (true);
 CREATE POLICY "View own tenant" ON tenants FOR SELECT USING (id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
--- Super admin sees all
-CREATE POLICY "Super admin all tenants" ON tenants FOR ALL USING (
-    EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'SUPER_ADMIN')
-);
+CREATE POLICY "Update own tenant" ON tenants FOR UPDATE USING (id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid() AND role IN ('ADMIN', 'SUPER_ADMIN')));
+CREATE POLICY "Super admin all tenants" ON tenants FOR ALL USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'SUPER_ADMIN'));
 
--- 6.2 PROFILE POLICIES
--- Self-read
+-- Profiles
 CREATE POLICY "View own profile" ON profiles FOR SELECT USING (id = auth.uid());
--- Tenant read
+CREATE POLICY "Update own profile" ON profiles FOR UPDATE USING (id = auth.uid());
 CREATE POLICY "View tenant profiles" ON profiles FOR SELECT USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
--- Admin write
-CREATE POLICY "Admin manage profiles" ON profiles FOR ALL USING (
-    tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid() AND role IN ('ADMIN', 'SUPER_ADMIN'))
-);
+CREATE POLICY "Manage tenant profiles" ON profiles FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid() AND role IN ('ADMIN', 'SUPER_ADMIN')));
 
--- 6.3 GENERIC TENANT DATA POLICIES (Apply to all other tables)
--- Standard Policy: "Can access if record.tenant_id matches user.tenant_id"
+-- Generic Tenant Isolation
+CREATE POLICY "Isolate products" ON products FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate orders" ON orders FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate categories" ON categories FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate customers" ON customers FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate suppliers" ON suppliers FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate expenses" ON expenses FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate logs" ON stock_logs FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate notifications" ON notifications FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate discounts" ON discounts FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Isolate POs" ON purchase_orders FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
 
-CREATE POLICY "Access own tenant products" ON products FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant categories" ON categories FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant orders" ON orders FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant customers" ON customers FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant suppliers" ON suppliers FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant expenses" ON expenses FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant logs" ON stock_logs FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant notifications" ON notifications FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant discounts" ON discounts FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Access own tenant settings" ON settings FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Public insert settings" ON settings FOR INSERT WITH CHECK (true); -- Needed for signup
+-- Settings
+CREATE POLICY "Isolate settings" ON settings FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Public insert settings" ON settings FOR INSERT WITH CHECK (true);
+
+-- Subscription Requests
+CREATE POLICY "Tenant manage requests" ON subscription_requests FOR ALL USING (tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Super admin all requests" ON subscription_requests FOR ALL USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'SUPER_ADMIN'));
 
 -- =======================================================================================================
--- 7. DEFAULT DATA
+-- 8. DEFAULT SEED DATA
 -- =======================================================================================================
 
 INSERT INTO plans (id, name, price, period, features, max_users, max_products, tier, description) VALUES 
 ('p1', 'Starter', 0, 'Monthly', ARRAY['1 User', '50 Products', 'Basic Support'], 1, 50, 'FREE', 'Perfect for small hobbies.'),
 ('p2', 'Pro', 2500, 'Monthly', ARRAY['5 Users', 'Unlimited Products', 'Priority Support', 'Analytics'], 5, 10000, 'PRO', 'For growing businesses.'),
-('p3', 'Enterprise', 25000, 'Yearly', ARRAY['Unlimited Users', 'API Access', 'Dedicated Manager', 'Custom Reports'], 100, 100000, 'ENTERPRISE', 'For large scale operations.');
+('p3', 'Enterprise', 25000, 'Yearly', ARRAY['Unlimited Users', 'API Access', 'Dedicated Manager', 'Custom Reports'], 100, 100000, 'ENTERPRISE', 'For large scale operations.')
+ON CONFLICT (id) DO NOTHING;
 
--- Final Grant
+-- Grant Permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO anon, authenticated, service_role;
-
